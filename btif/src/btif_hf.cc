@@ -482,8 +482,10 @@ static void btif_hf_upstreams_evt(uint16_t event, char* p_param) {
   int idx;
   bool ignore_rfc_fail = false;
   RawAddress bd_addr;
+#if (TWS_AG_ENABLED == TRUE)
   RawAddress peer_eb_addr;
   int peer_eb_dev_type;
+#endif
 
   BTIF_TRACE_IMP("%s: event=%s", __func__, dump_hf_event(event));
   // for BTA_AG_ENABLE_EVT/BTA_AG_DISABLE_EVT, p_data is NULL
@@ -617,6 +619,13 @@ static void btif_hf_upstreams_evt(uint16_t event, char* p_param) {
       btif_hf_cb[idx].connected_bda = RawAddress::kAny;
       btif_hf_cb[idx].peer_feat = 0;
       clear_phone_state_multihf(idx);
+      //If the active device is disconnected, clear the active device
+      if (is_active_device(bd_addr)) {
+        active_bda = RawAddress::kEmpty;
+        BTIF_TRACE_IMP("%s: Active device is disconnected, clear the active device %s",
+            __func__, active_bda.ToString().c_str());
+        BTA_AgSetActiveDevice(active_bda);
+      }
       /* If AG_OPEN was received but SLC was not setup in a specified time (10
        *seconds),
        ** then AG_CLOSE may be received. We need to advance the queue here
@@ -1437,7 +1446,7 @@ bt_status_t HeadsetInterface::FormattedAtResponse(const char* rsp,
   if (idx != BTIF_HF_INVALID_IDX) {
     /* Format the response and send */
     memset(&ag_res, 0, sizeof(ag_res));
-    strlcpy(ag_res.str, rsp, BTA_AG_AT_MAX_LEN);
+    strlcpy(ag_res.str, rsp, BTA_AG_AT_MAX_LEN + 1);
     BTA_AgResult(btif_hf_cb[idx].handle, BTA_AG_UNAT_RES, &ag_res);
 
     return BT_STATUS_SUCCESS;
@@ -1539,11 +1548,12 @@ bt_status_t HeadsetInterface::ClccResponse(int index, bthf_call_direction_t dir,
           }
         }
         dialnum[newidx] = 0;
-        // Reserve 5 bytes for ["][,][3_digit_type]
-        snprintf(&ag_res.str[res_strlen], rem_bytes - 5, ",\"%s", dialnum);
+        // Reserve 4 bytes for [,][3_digit_type]
+        snprintf(&ag_res.str[res_strlen], rem_bytes - 4, ",\"%s\"", dialnum);
         std::stringstream remaining_string;
-        remaining_string << "\"," << type;
-        strncat(&ag_res.str[res_strlen], remaining_string.str().c_str(), 5);
+        remaining_string << "," << type;
+        strlcat(&ag_res.str[res_strlen], remaining_string.str().c_str(), sizeof(ag_res.str));
+        BTIF_TRACE_EVENT("clcc_response: The CLCC response is, ag_res.str: %s", ag_res.str);
       }
     }
     BTA_AgResult(btif_hf_cb[idx].handle, BTA_AG_CLCC_RES, &ag_res);
@@ -2040,6 +2050,14 @@ bt_status_t HeadsetInterface::SetActiveDevice(RawAddress* active_device_addr) {
   CHECK_BTHF_INIT();
 
   if (!active_device_addr->IsEmpty()) {
+    //If the app is setting a device as active, which is already active in stack,
+    //return success
+    if (*active_device_addr == active_bda) {
+      BTIF_TRACE_IMP(
+        "%s: Allow app to set device: %s as active, which is already active in stack",
+         __func__, active_device_addr->ToString().c_str());
+      return BT_STATUS_SUCCESS;
+    }
     // if SCO is setting up, don't allow active device switch
     for (int i = 0; i < btif_max_hf_clients; i++) {
       if (btif_hf_cb[i].audio_state == BTHF_AUDIO_STATE_CONNECTING) {
