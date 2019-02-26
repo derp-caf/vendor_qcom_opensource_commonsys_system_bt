@@ -1759,6 +1759,11 @@ void bta_av_str_opened(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
           p_scb->channel_mode = 1;//Right channe
       }
     }
+    if (p_scb->tws_device && ((p_scb->role & BTA_AV_ROLE_AD_ACP) == 0)) {
+    //For outgoing TWS+ connection, initiate avrcp connection
+      APPL_TRACE_DEBUG("%s:Initiating avrcp connection for TWS+ remote",__func__);
+      bta_av_open_rc(p_scb, p_data);
+    }
 #endif
     if (open.starting) {
       bta_av_ssm_execute(p_scb, BTA_AV_AP_START_EVT, NULL);
