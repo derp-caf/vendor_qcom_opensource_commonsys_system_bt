@@ -713,20 +713,6 @@ static void btif_hf_upstreams_evt(uint16_t event, char* p_param) {
 
     /* BTA auto-responds, silently discard */
     case BTA_AG_SPK_EVT:
-#if (TWS_AG_ENABLED == TRUE)
-        if (btif_is_tws_plus_device(&btif_hf_cb[idx].connected_bda)) {
-            tBTA_AG_RES_DATA ag_res;
-            int other_idx;
-            memset(&ag_res, 0, sizeof(tBTA_AG_RES_DATA));
-            ag_res.num = p_data->val.num;
-            other_idx = btif_hf_get_other_connected_index(idx);
-            if (other_idx != btif_max_hf_clients) {
-                BTA_AgResult(
-                   btif_hf_cb[other_idx].handle,
-                   BTA_AG_SPK_RES, &ag_res);
-            }
-        }
-#endif
     case BTA_AG_MIC_EVT:
       HAL_HF_CBACK(bt_hf_callbacks, VolumeControlCallback,
                 (event == BTA_AG_SPK_EVT) ? BTHF_VOLUME_TYPE_SPK
