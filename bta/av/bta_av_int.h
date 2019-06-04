@@ -645,6 +645,8 @@ typedef struct {
   tBTA_AV_FEAT peer_features; /* peer features mask */
   uint16_t  cover_art_psm;  /* l2cap psm for cover art on remote */
   bool browse_open;
+  bool rc_opened;
+  RawAddress peer_addr;
 } tBTA_AV_RCB;
 #define BTA_AV_NUM_RCB (BTA_AV_NUM_STRS + 2)
 
