@@ -34,11 +34,11 @@
 #include <string>
 
 #include <hardware/bt_av.h>
-
 #include "a2dp_api.h"
 #include "audio_a2dp_hw/include/audio_a2dp_hw.h"
 #include "avdt_api.h"
 #include "osi/include/time.h"
+#include "bt_target.h"
 
 /**
  * Structure used to initialize the A2DP encoder with A2DP peer information
@@ -498,6 +498,12 @@ typedef struct {
   void (*set_transmit_queue_length)(size_t transmit_queue_length);
 } tA2DP_ENCODER_INTERFACE;
 
+// Gets peer sink endpoint codec type.
+// |p_codec_info| contains information about the codec capabilities.
+#if (BT_IOT_LOGGING_ENABLED == TRUE)
+int A2DP_IotGetPeerSinkCodecType(const uint8_t* p_codec_info);
+#endif
+
 // Gets the A2DP codec type.
 // |p_codec_info| contains information about the codec capabilities.
 tA2DP_CODEC_TYPE A2DP_GetCodecType(const uint8_t* p_codec_info);
@@ -652,6 +658,11 @@ bool A2DP_AdjustCodec(uint8_t* p_codec_info);
 // Returns the corresponding |btav_a2dp_codec_index_t| on success,
 // otherwise |BTAV_A2DP_CODEC_INDEX_MAX|.
 btav_a2dp_codec_index_t A2DP_SourceCodecIndex(const uint8_t* p_codec_info);
+
+// Gets the A2DP Source codec index for a given |p_codec_info|.
+// Returns the corresponding |btav_a2dp_codec_index_t| on success,
+// otherwise |BTAV_A2DP_CODEC_INDEX_MAX|.
+btav_a2dp_codec_index_t A2DP_SinkCodecIndex(const uint8_t* p_codec_info);
 
 // Gets the A2DP codec name for a given |codec_index|.
 const char* A2DP_CodecIndexStr(btav_a2dp_codec_index_t codec_index);

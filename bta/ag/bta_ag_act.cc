@@ -72,6 +72,7 @@
 #include "bta_ag_twsp_dev.h"
 #include "bta_ag_twsp.h"
 #endif
+#include "device/include/device_iot_config.h"
 
 /*****************************************************************************
  *  Constants
@@ -96,7 +97,7 @@ const tBTA_SERVICE_MASK bta_ag_svc_mask[BTA_AG_NUM_IDX] = {
     BTA_HSP_SERVICE_MASK, BTA_HFP_SERVICE_MASK};
 
 typedef void (*tBTA_AG_ATCMD_CBACK)(tBTA_AG_SCB* p_scb, uint16_t cmd,
-                                    uint8_t arg_type, char* p_arg,
+                                    uint8_t arg_type, char* p_arg, char* p_end,
                                     int16_t int_arg);
 
 const tBTA_AG_ATCMD_CBACK bta_ag_at_cback_tbl[BTA_AG_NUM_IDX] = {
@@ -305,6 +306,11 @@ void bta_ag_disc_int_res(tBTA_AG_SCB* p_scb, tBTA_AG_DATA* p_data) {
 
       /* send ourselves sdp ok event */
       event = BTA_AG_DISC_OK_EVT;
+
+#if (BT_IOT_LOGGING_ENABLED == TRUE)
+      device_iot_config_addr_set_hex_if_greater(p_scb->peer_addr,
+              IOT_CONF_KEY_HFP_VERSION, p_scb->peer_version, IOT_CONF_BYTE_NUM_2);
+#endif
     }
   }
 
@@ -353,6 +359,10 @@ void bta_ag_disc_acp_res(tBTA_AG_SCB* p_scb, tBTA_AG_DATA* p_data) {
       p_data->disc_result.status == SDP_DB_FULL) {
     /* get attributes */
     bta_ag_sdp_find_attr(p_scb, bta_ag_svc_mask[p_scb->conn_service]);
+#if (BT_IOT_LOGGING_ENABLED == TRUE)
+    device_iot_config_addr_set_hex_if_greater(p_scb->peer_addr,
+            IOT_CONF_KEY_HFP_VERSION, p_scb->peer_version, IOT_CONF_BYTE_NUM_2);
+#endif
   }
 
   /* free discovery db */
@@ -469,6 +479,7 @@ void bta_ag_rfc_close(tBTA_AG_SCB* p_scb, UNUSED_ATTR tBTA_AG_DATA* p_data) {
   /* stop timers */
   alarm_cancel(p_scb->ring_timer);
   alarm_cancel(p_scb->codec_negotiation_timer);
+  alarm_cancel(p_scb->xsco_conn_collision_timer);
 
   close.hdr.handle = bta_ag_scb_to_idx(p_scb);
   close.hdr.app_id = p_scb->app_id;
@@ -482,7 +493,9 @@ void bta_ag_rfc_close(tBTA_AG_SCB* p_scb, UNUSED_ATTR tBTA_AG_DATA* p_data) {
   /* call close cback */
   (*bta_ag_cb.p_cback)(BTA_AG_CLOSE_EVT, (tBTA_AG*)&close);
 #if (TWS_AG_ENABLED == TRUE)
-  reset_twsp_device(bta_ag_scb_to_idx(p_scb)-1);
+  if (is_twsp_device(p_scb->peer_addr)) {
+    reset_twsp_device(twsp_get_idx_by_scb(p_scb));
+  }
 #endif
 
   /* if not deregistering (deallocating) reopen registered servers */
@@ -577,7 +590,9 @@ void bta_ag_rfc_open(tBTA_AG_SCB* p_scb, tBTA_AG_DATA* p_data) {
                         BTA_AG_SVC_TIMEOUT_EVT, bta_ag_scb_to_idx(p_scb));
 #if (TWS_AG_ENABLED == TRUE)
     //Update TWS+ data structure
-    update_twsp_device(bta_ag_scb_to_idx(p_scb)-1, p_scb);
+    if (is_twsp_device(p_scb->peer_addr)) {
+      update_twsp_device(p_scb);
+    }
 #endif
   } else {
     /* else service level conn is open */
@@ -1033,6 +1048,8 @@ void bta_ag_handle_collision(tBTA_AG_SCB* p_scb,
   APPL_TRACE_IMP("%s: sending RFCOMM fail event to btif for dev %s",
                   __func__, p_scb->peer_addr.ToString().c_str())
   bta_ag_cback_open(p_scb, NULL, BTA_AG_FAIL_RFCOMM);
+  APPL_TRACE_DEBUG("%s: clear peer_addr so that instance can be reused", __func__);
+  p_scb->peer_addr = RawAddress::kEmpty;
 
   /* reopen registered servers */
   /* Collision may be detected before or after we close servers. */

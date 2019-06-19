@@ -141,6 +141,14 @@ typedef uint8_t tBTA_AV_HNDL;
 #define BTA_AV_MAX_VDP_MTU 1008
 #endif
 
+//Whenever we update peer MTU value, we need to deduct A2DP header, and
+//if SCMS-T enabled it would be 2 bytes else it would be 1 byte.
+#if (BTA_AV_CO_CP_SCMS_T == TRUE)
+#define A2DP_HEADER_SIZE  2
+#else
+#define A2DP_HEADER_SIZE  1
+#endif
+
 /* operation id list for BTA_AvRemoteCmd */
 #define BTA_AV_RC_SELECT AVRC_ID_SELECT         /* select */
 #define BTA_AV_RC_UP AVRC_ID_UP                 /* up */
@@ -521,7 +529,7 @@ typedef union {
 
 /* AV callback */
 typedef void(tBTA_AV_CBACK)(tBTA_AV_EVT event, tBTA_AV* p_data);
-typedef void(tBTA_AV_SINK_DATA_CBACK)(tBTA_AV_EVT event, tBTA_AV_MEDIA* p_data);
+typedef void(tBTA_AV_SINK_DATA_CBACK)(tBTA_AV_EVT event, tBTA_AV_MEDIA* p_data, RawAddress bd_addr);
 
 /* type for stream state machine action functions */
 typedef void (*tBTA_AV_ACT)(void* p_cb, void* p_data);

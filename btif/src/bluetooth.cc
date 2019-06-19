@@ -63,6 +63,7 @@
 #include "device/include/controller.h"
 #include "btif_debug.h"
 #include "btif_storage.h"
+#include "device/include/device_iot_config.h"
 #include "btsnoop.h"
 #include "btsnoop_mem.h"
 #include "device/include/interop.h"
@@ -331,6 +332,9 @@ static void dump(int fd, const char** arguments) {
   btif_debug_bond_event_dump(fd);
   btif_debug_a2dp_dump(fd);
   btif_debug_config_dump(fd);
+#if (BT_IOT_LOGGING_ENABLED == TRUE)
+  device_debug_iot_config_dump(fd);
+#endif
   BTA_HfClientDumpStatistics(fd);
   wakelock_debug_dump(fd);
   osi_allocator_debug_dump(fd);
@@ -338,8 +342,6 @@ static void dump(int fd, const char** arguments) {
 #if (BTSNOOP_MEM == TRUE)
   btif_debug_btsnoop_dump(fd);
 #endif
-
-  close(fd);
 }
 
 static const void* get_profile_interface(const char* profile_id) {

@@ -803,6 +803,9 @@ void l2cu_send_peer_config_rej(tL2C_CCB* p_ccb, uint8_t* p_data,
       case L2CAP_CFG_TYPE_MTU:
       case L2CAP_CFG_TYPE_FLUSH_TOUT:
       case L2CAP_CFG_TYPE_QOS:
+      case L2CAP_CFG_TYPE_FCR:
+      case L2CAP_CFG_TYPE_FCS:
+      case L2CAP_CFG_TYPE_EXT_FLOW:
         p_data += cfg_len + L2CAP_CFG_OPTION_OVERHEAD;
         break;
 
@@ -1603,9 +1606,8 @@ void l2cu_release_ccb(tL2C_CCB* p_ccb) {
   if(p_lcb)
     btm_sec_clr_temp_auth_service(p_lcb->remote_bd_addr);
 
-  /* Free the timer */
-  alarm_free(p_ccb->l2c_ccb_timer);
-  p_ccb->l2c_ccb_timer = NULL;
+  /* Cancel the timer */
+  alarm_cancel(p_ccb->l2c_ccb_timer);
 
   fixed_queue_free(p_ccb->xmit_hold_q, osi_free);
   p_ccb->xmit_hold_q = NULL;

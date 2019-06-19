@@ -84,6 +84,7 @@
 #if (BTA_AR_INCLUDED == TRUE)
 #include "bta_ar_api.h"
 #endif
+#include "device/include/device_iot_config.h"
 
 /*****************************************************************************
  *  Constants
@@ -311,11 +312,7 @@ tAVDT_CTRL_CBACK* const bta_av_dt_cback[] = {bta_av_stream0_cback,
  * Returns          void
  **********************************************/
 static uint8_t bta_av_get_scb_handle(tBTA_AV_SCB* p_scb, uint8_t local_sep) {
-#if (TWS_ENABLED == TRUE)
-  for (int i = 0; i < BTAV_VENDOR_A2DP_CODEC_INDEX_MAX; i++) {
-#else
   for (int i = 0; i < BTAV_A2DP_CODEC_INDEX_MAX; i++) {
-#endif
     if ((p_scb->seps[i].tsep == local_sep) &&
         A2DP_CodecTypeEquals(p_scb->seps[i].codec_info,
                              p_scb->cfg.codec_info)) {
@@ -337,11 +334,7 @@ static uint8_t bta_av_get_scb_handle(tBTA_AV_SCB* p_scb, uint8_t local_sep) {
  **********************************************/
 static uint8_t bta_av_get_scb_sep_type(tBTA_AV_SCB* p_scb,
                                        uint8_t tavdt_handle) {
-#if (TWS_ENABLED == TRUE)
-  for (int i = 0; i < BTAV_VENDOR_A2DP_CODEC_INDEX_MAX; i++) {
-#else
   for (int i = 0; i < BTAV_A2DP_CODEC_INDEX_MAX; i++) {
-#endif
     if (p_scb->seps[i].av_handle == tavdt_handle) return (p_scb->seps[i].tsep);
   }
   APPL_TRACE_DEBUG("%s: handle %d not found", __func__, tavdt_handle)
@@ -713,7 +706,7 @@ void bta_av_sink_data_cback(uint8_t handle, BT_HDR* p_pkt, uint32_t time_stamp,
   }
   p_pkt->event = BTA_AV_SINK_MEDIA_DATA_EVT;
   p_scb->seps[p_scb->sep_idx].p_app_sink_data_cback(BTA_AV_SINK_MEDIA_DATA_EVT,
-                                                    (tBTA_AV_MEDIA*)p_pkt);
+                                                    (tBTA_AV_MEDIA*)p_pkt, p_scb->peer_addr);
   /* Free the buffer: a copy of the packet has been delivered */
   osi_free(p_pkt);
 }
@@ -846,8 +839,13 @@ static void bta_av_a2dp_sdp_cback(bool found, tA2DP_Service* p_service) {
   } else {
     p_msg->hdr.event =
         (found) ? BTA_AV_SDP_DISC_OK_EVT : BTA_AV_SDP_DISC_FAIL_EVT;
-    if (found && (p_service != NULL))
+    if (found && (p_service != NULL)) {
       p_scb->avdt_version = p_service->avdt_version;
+#if (BT_IOT_LOGGING_ENABLED == TRUE)
+      device_iot_config_addr_set_hex_if_greater(p_scb->peer_addr,
+              IOT_CONF_KEY_A2DP_VERSION, p_scb->avdt_version, IOT_CONF_BYTE_NUM_2);
+#endif
+    }
     else
       p_scb->avdt_version = 0x00;
   }
@@ -911,11 +909,7 @@ static void bta_av_a2dp_sdp_cback2(bool found, tA2DP_Service* p_service, tBTA_AV
 static void bta_av_adjust_seps_idx(tBTA_AV_SCB* p_scb, uint8_t avdt_handle) {
   APPL_TRACE_DEBUG("%s: codec: %s and codec_index = %d", __func__,
           A2DP_CodecName(p_scb->cfg.codec_info), A2DP_SourceCodecIndex(p_scb->cfg.codec_info));
-#if (TWS_ENABLED == TRUE)
-  for (int i = 0; i < BTAV_VENDOR_A2DP_CODEC_INDEX_MAX; i++) {
-#else
   for (int i = 0; i < BTAV_A2DP_CODEC_INDEX_MAX; i++) {
-#endif
     APPL_TRACE_DEBUG("%s: av_handle: %d codec: %s", __func__,
                      p_scb->seps[i].av_handle,
                      A2DP_CodecName(p_scb->seps[i].codec_info));
@@ -1176,6 +1170,10 @@ void bta_av_do_disc_a2dp(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
             if (!interop_match_addr_or_name(INTEROP_DISABLE_ROLE_SWITCH,
                                           &p_scbi->peer_addr)) {
               APPL_TRACE_DEBUG("%s:RS disabled, returning",__func__);
+#if (TWS_ENABLED == TRUE)
+              if (p_scbi->tws_device)
+                AVDT_UpdateServiceBusyState(false);
+#endif
               return;
             }else {
               APPL_TRACE_DEBUG("%s: Other connected remote is blacklisted for RS",__func__);
@@ -1322,11 +1320,7 @@ void bta_av_cleanup(tBTA_AV_SCB* p_scb, UNUSED_ATTR tBTA_AV_DATA* p_data) {
   p_scb->skip_sdp = false;
   if (p_scb->deregistring) {
     /* remove stream */
-#if (TWS_ENABLED == TRUE)
-  for (int i = 0; i < BTAV_VENDOR_A2DP_CODEC_INDEX_MAX; i++) {
-#else
   for (int i = 0; i < BTAV_A2DP_CODEC_INDEX_MAX; i++) {
-#endif
       if (p_scb->seps[i].av_handle) AVDT_RemoveStream(p_scb->seps[i].av_handle);
       p_scb->seps[i].av_handle = 0;
     }
@@ -1408,10 +1402,19 @@ void bta_av_config_ind(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
     p_info->seid = p_data->str_msg.msg.config_ind.int_seid;
 
     /* Sep type of Peer will be oppsite role to our local sep */
-    if (local_sep == AVDT_TSEP_SRC)
+    if (local_sep == AVDT_TSEP_SRC) {
       p_info->tsep = AVDT_TSEP_SNK;
-    else if (local_sep == AVDT_TSEP_SNK)
+#if (BT_IOT_LOGGING_ENABLED == TRUE)
+      device_iot_config_addr_set_int(p_scb->peer_addr,
+          IOT_CONF_KEY_A2DP_ROLE, IOT_CONF_VAL_A2DP_ROLE_SINK);
+#endif
+    } else if (local_sep == AVDT_TSEP_SNK) {
       p_info->tsep = AVDT_TSEP_SRC;
+#if (BT_IOT_LOGGING_ENABLED == TRUE)
+      device_iot_config_addr_set_int(p_scb->peer_addr,
+          IOT_CONF_KEY_A2DP_ROLE, IOT_CONF_VAL_A2DP_ROLE_SOURCE);
+#endif
+    }
 
     p_scb->role |= BTA_AV_ROLE_AD_ACP;
     p_scb->cur_psc_mask = p_evt_cfg->psc_mask;
@@ -1520,15 +1523,13 @@ void bta_av_security_rsp(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
 void bta_av_setconfig_rsp(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
   uint8_t num = p_data->ci_setconfig.num_seid + 1;
   uint8_t avdt_handle = p_data->ci_setconfig.avdt_handle;
-  uint8_t* p_seid = p_data->ci_setconfig.p_seid;
-  int i;
   uint8_t local_sep;
 
   /* we like this codec_type. find the sep_idx */
   local_sep = bta_av_get_scb_sep_type(p_scb, avdt_handle);
   bta_av_adjust_seps_idx(p_scb, avdt_handle);
-  APPL_TRACE_DEBUG("%s: sep_idx: %d cur_psc_mask:0x%x", __func__,
-                   p_scb->sep_idx, p_scb->cur_psc_mask);
+  APPL_TRACE_DEBUG("%s: sep_idx: %d cur_psc_mask:0x%x, num: %d", __func__,
+                   p_scb->sep_idx, p_scb->cur_psc_mask, num);
 
   if ((AVDT_TSEP_SNK == local_sep) &&
       (p_data->ci_setconfig.err_code == AVDT_SUCCESS) &&
@@ -1537,7 +1538,7 @@ void bta_av_setconfig_rsp(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
     av_sink_codec_info.avk_config.bd_addr = p_scb->peer_addr;
     av_sink_codec_info.avk_config.codec_info = p_scb->cfg.codec_info;
     p_scb->seps[p_scb->sep_idx].p_app_sink_data_cback(BTA_AV_SINK_MEDIA_CFG_EVT,
-                                                      &av_sink_codec_info);
+                                                      &av_sink_codec_info, p_scb->peer_addr);
   }
 
   AVDT_ConfigRsp(p_scb->avdt_handle, p_scb->avdt_label,
@@ -1560,37 +1561,11 @@ void bta_av_setconfig_rsp(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
     else
       p_scb->avdt_version = AVDT_VERSION;
 
-    if (A2DP_GetCodecType(p_scb->cfg.codec_info) == A2DP_MEDIA_CT_SBC || num > 1) {
-        /* For any codec used by the SNK as INT, discover req is not sent in bta_av_config_ind.
-         * This is done since we saw an IOT issue with APTX codec. Thus, we now take same
-         * path for all codecs as for SBC. call disc_res now */
-        /* this is called in A2DP SRC path only, In case of SINK we don't need it  */
-        if (local_sep == AVDT_TSEP_SRC)
-          p_scb->p_cos->disc_res(p_scb->hndl, num, num, 0, p_scb->peer_addr,
-                                 UUID_SERVCLASS_AUDIO_SOURCE);
-
-        for (i = 1; i < num; i++) {
-          APPL_TRACE_DEBUG("%s: sep_info[%d] SEID: %d", __func__, i, p_seid[i - 1]);
-          /* initialize the sep_info[] to get capabilities */
-          p_scb->sep_info[i].in_use = false;
-          p_scb->sep_info[i].tsep = AVDT_TSEP_SNK;
-          p_scb->sep_info[i].media_type = p_scb->media_type;
-          p_scb->sep_info[i].seid = p_seid[i - 1];
-        }
-
-        /* only in case of local sep as SRC we need to look for other SEPs, In case
-         * of SINK we don't */
-        if (local_sep == AVDT_TSEP_SRC) {
-          /* Make sure UUID has been initialized... */
-          if (p_scb->uuid_int == 0) p_scb->uuid_int = UUID_SERVCLASS_AUDIO_SOURCE;
-            bta_av_next_getcap(p_scb, p_data);
-        }
-    } else {
-        if (local_sep == AVDT_TSEP_SRC)
-          if (p_scb->uuid_int == 0) p_scb->uuid_int = UUID_SERVCLASS_AUDIO_SOURCE/*p_scb->open_api.uuid*/;
-            /* we do not know the peer device and it is using non-SBC codec
-             * we need to know all the SEPs on SNK */
-          bta_av_discover_req(p_scb, NULL);
+    if (local_sep == AVDT_TSEP_SRC) {
+      if (p_scb->uuid_int == 0) p_scb->uuid_int = UUID_SERVCLASS_AUDIO_SOURCE;
+        /* we do not know the peer device and it is using non-SBC codec
+         * we need to know all the SEPs on SNK */
+      bta_av_discover_req(p_scb, NULL);
     }
   }
 }
@@ -2250,7 +2225,7 @@ void bta_av_getcap_results(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
                     __func__, media_type, p_scb->media_type, codec_type,
                     p_scb->p_cap->codec_info[A2DP_SBC_IE_MIN_BITPOOL_OFFSET],
                     p_scb->p_cap->codec_info[A2DP_SBC_IE_MAX_BITPOOL_OFFSET]);
-  if (codec_type ==A2DP_MEDIA_CT_SBC ) {
+  if (codec_type == A2DP_MEDIA_CT_SBC ) {
     //minbitpool < 2, then set minbitpool = 2
     if ((p_scb->p_cap->codec_info[A2DP_SBC_IE_MIN_BITPOOL_OFFSET]) < A2DP_SBC_IE_MIN_BITPOOL) {
       p_scb->p_cap->codec_info[A2DP_SBC_IE_MIN_BITPOOL_OFFSET] = A2DP_SBC_IE_MIN_BITPOOL;
@@ -2293,7 +2268,7 @@ void bta_av_getcap_results(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
   APPL_TRACE_DEBUG("%s: min/max bitpool: %x/%x", __func__,
                      p_scb->p_cap->codec_info[A2DP_SBC_IE_MIN_BITPOOL_OFFSET],
                      p_scb->p_cap->codec_info[A2DP_SBC_IE_MAX_BITPOOL_OFFSET]);
-  A2DP_DumpCodecInfo(p_scb->cfg.codec_info);
+  A2DP_DumpCodecInfo(p_scb->p_cap->codec_info);
 
   /* if codec present and we get a codec configuration */
   if ((p_scb->p_cap->num_codec != 0) && (media_type == p_scb->media_type) &&
@@ -2305,7 +2280,7 @@ void bta_av_getcap_results(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
 
     APPL_TRACE_DEBUG("%s: result: sep_info_idx=%d", __func__,
                      p_scb->sep_info_idx);
-    A2DP_DumpCodecInfo(p_scb->cfg.codec_info);
+    A2DP_DumpCodecInfo(p_scb->p_cap->codec_info);
 
     uuid_int = p_scb->uuid_int;
     APPL_TRACE_DEBUG("%s: initiator UUID = 0x%x", __func__, uuid_int);
@@ -2334,18 +2309,12 @@ void bta_av_getcap_results(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
       av_sink_codec_info.avk_config.bd_addr = p_scb->peer_addr;
       av_sink_codec_info.avk_config.codec_info = p_scb->cfg.codec_info;
       p_scb->seps[p_scb->sep_idx].p_app_sink_data_cback(
-          BTA_AV_SINK_MEDIA_CFG_EVT, &av_sink_codec_info);
+          BTA_AV_SINK_MEDIA_CFG_EVT, &av_sink_codec_info, p_scb->peer_addr);
     }
 
     if (uuid_int == UUID_SERVCLASS_AUDIO_SOURCE) {
       A2DP_AdjustCodec(cfg.codec_info);
     }
-#if (TWS_ENABLED == TRUE)
-    if (strcmp(A2DP_CodecName(cfg.codec_info), "aptX-TWS") == 0) {
-      cfg.psc_mask &= ~AVDT_PSC_DELAY_RPT;
-      APPL_TRACE_DEBUG("%s:resetting delay report flag for tws+ codec",__func__);
-    }
-#endif
     /* open the stream */
     AVDT_OpenReq(p_scb->seps[p_scb->sep_idx].av_handle, p_scb->peer_addr,
                  p_scb->sep_info[p_scb->sep_info_idx].seid, &cfg);
@@ -3811,8 +3780,21 @@ void offload_vendor_callback(tBTM_VSC_CMPL *param)
             break;
           }
 #if (BTA_AV_CO_CP_SCMS_T == TRUE)
-          param[0] = VS_QHCI_A2DP_WRITE_SCMS_T_CP;
-          param[1] = offload_start.cp_flag;
+         if (offload_start.cp_active){
+           param[0] = VS_QHCI_A2DP_WRITE_SCMS_T_CP;
+           param[1] = offload_start.cp_flag;
+         }else{
+            if (last_sent_vsc_cmd == VS_QHCI_START_A2DP_MEDIA) {
+                   APPL_TRACE_DEBUG("%s: START VSC already exchanged.", __func__);
+                   status = 0;
+                   (*bta_av_cb.p_cback)(BTA_AV_OFFLOAD_START_RSP_EVT, (tBTA_AV*)&status);
+                   return;
+               }
+               last_sent_vsc_cmd = VS_QHCI_START_A2DP_MEDIA;
+               param[0] = VS_QHCI_START_A2DP_MEDIA;
+               param[1] = 0;
+             }
+
 #else
           if (last_sent_vsc_cmd == VS_QHCI_START_A2DP_MEDIA) {
             APPL_TRACE_DEBUG("%s: START VSC already exchanged.", __func__);
@@ -3833,15 +3815,6 @@ void offload_vendor_callback(tBTM_VSC_CMPL *param)
           uint8_t param[2];
           APPL_TRACE_DEBUG("VS_QHCI_A2DP_WRITE_SCMS_T_CP successful");
           APPL_TRACE_DEBUG("%s: Last cached VSC command: 0x0%x", __func__, last_sent_vsc_cmd);
-          if (!btif_a2dp_src_vsc.vs_configs_exchanged &&
-              btif_a2dp_src_vsc.tx_start_initiated)
-            btif_a2dp_src_vsc.vs_configs_exchanged = TRUE;
-          else {
-            APPL_TRACE_ERROR("Dont send start, stream suspended update fail to Audio");
-            status = 1;//FAIL
-            (*bta_av_cb.p_cback)(BTA_AV_OFFLOAD_START_RSP_EVT, (tBTA_AV*)&status);
-            break;
-          }
           if (last_sent_vsc_cmd == VS_QHCI_START_A2DP_MEDIA) {
             APPL_TRACE_DEBUG("%s: START VSC already exchanged.", __func__);
             status = 0;

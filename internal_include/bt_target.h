@@ -576,6 +576,10 @@
 #endif
 
 /* The maximum number of simultaneous channels that L2CAP can support. */
+#if defined (MAX_L2CAP_CHANNELS) && (MAX_L2CAP_CHANNELS < 32)
+#undef MAX_L2CAP_CHANNELS
+#endif
+
 #ifndef MAX_L2CAP_CHANNELS
 #define MAX_L2CAP_CHANNELS 20
 #endif
@@ -1572,6 +1576,11 @@ single PDU.
 /* Enable/disable BTSnoop memory logging */
 #ifndef BTSNOOP_MEM
 #define BTSNOOP_MEM TRUE
+#endif
+
+/* Enable iot info logging */
+#ifndef BT_IOT_LOGGING_ENABLED
+#define BT_IOT_LOGGING_ENABLED TRUE
 #endif
 
 #include "bt_trace.h"

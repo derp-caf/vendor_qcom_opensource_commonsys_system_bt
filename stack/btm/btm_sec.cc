@@ -41,6 +41,7 @@
 #include "l2c_int.h"
 
 #include "gatt_int.h"
+#include "device/include/device_iot_config.h"
 
 #define BTM_SEC_MAX_COLLISION_DELAY (5000)
 
@@ -3173,7 +3174,7 @@ void btm_sec_rmt_name_request_complete(const RawAddress* p_bd_addr,
         BTM_TRACE_ERROR("%s: failed to start remote name request", __func__);
         if (btm_cb.api.p_auth_complete_callback) {
           (*btm_cb.api.p_auth_complete_callback)(
-              p_dev_rec->bd_addr, p_dev_rec->dev_class, p_dev_rec->sec_bd_name,
+              btm_cb.pairing_bda, 0, p_bd_name,
               HCI_ERR_MEMORY_FULL);
         }
       };
@@ -4686,6 +4687,12 @@ void btm_sec_disconnected(uint16_t handle, uint8_t reason) {
       } else if (old_pairing_flags & BTM_PAIR_FLAGS_WE_STARTED_DD) {
         result = HCI_ERR_HOST_REJECT_SECURITY;
       }
+#if (BT_IOT_LOGGING_ENABLED == TRUE)
+      else {
+        device_iot_config_addr_int_add_one(p_dev_rec->bd_addr,
+           IOT_CONF_KEY_GAP_DISC_AUTHFAIL_COUNT);
+      }
+#endif
       trigger_auth_callback = true;
     }
   }
@@ -5149,6 +5156,7 @@ void btm_sec_pin_code_request(const RawAddress& p_bda) {
         "Rec:%x!",
         p_cb->pairing_disabled, p_cb->api.p_pin_callback, p_dev_rec);
 
+    btm_sec_change_pairing_state(BTM_PAIR_STATE_WAIT_AUTH_COMPLETE);
     btsnd_hcic_pin_code_neg_reply(p_bda);
   }
   /* Notify upper layer of PIN request and start expiration timer */
