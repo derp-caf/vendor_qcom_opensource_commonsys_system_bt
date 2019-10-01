@@ -1116,12 +1116,18 @@ void bta_ag_sco_event(tBTA_AG_SCB* p_scb, uint8_t event) {
           /* remove listening connection */
           bta_ag_remove_sco(p_scb, false);
 
-          if (p_scb == p_sco->p_curr_scb) p_sco->p_curr_scb = NULL;
 
           /* If last SCO instance then finish shutting down */
           if (!bta_ag_other_scb_open(p_scb)) {
             p_sco->state = BTA_AG_SCO_SHUTDOWN_ST;
+          } else if (p_scb == p_sco->p_curr_scb) {
+            p_sco->state = BTA_AG_SCO_LISTEN_ST;
           }
+
+          if (p_scb == p_sco->p_curr_scb) {
+            p_sco->p_curr_scb = NULL;
+          }
+
 #if (TWS_AG_ENABLED == TRUE)
           if (is_twsp_device(p_scb->peer_addr)) {
              p_sco->state = BTA_AG_SCO_SHUTDOWN_ST;
