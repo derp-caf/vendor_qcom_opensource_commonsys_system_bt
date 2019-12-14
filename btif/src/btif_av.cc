@@ -82,8 +82,14 @@
 #include "btif_bat.h"
 #include "bta/av/bta_av_int.h"
 #include "device/include/device_iot_config.h"
+#if (OFF_TARGET_TEST_ENABLED == FALSE)
 #include "audio_hal_interface/a2dp_encoding.h"
+#endif
 #include "controller.h"
+#if (OFF_TARGET_TEST_ENABLED == TRUE)
+#include "log/log.h"
+#include "service/a2dp_hal_sim/audio_a2dp_hal_stub.h"
+#endif
 
 extern bool isDevUiReq;
 bool isBitRateChange = false;
@@ -470,6 +476,7 @@ static void btif_initiate_av_open_timer_timeout(void* data) {
   RawAddress peer_addr;
   btif_av_connect_req_t connect_req;
   RawAddress *bd_add = (RawAddress *)data;
+  if (bd_add == nullptr) return;
   BTIF_TRACE_DEBUG("%s: bd_add: %s", __func__, bd_add->ToString().c_str());
 
   memset(&connect_req, 0, sizeof(btif_av_connect_req_t));
@@ -1932,7 +1939,7 @@ static bool btif_av_state_opened_handler(btif_sm_event_t event, void* p_data,
               if(!btif_av_cb[index].remote_started) {
                 BTIF_TRACE_DEBUG("%s: honor remote start on index %d",__func__, index);
                 btif_av_cb[index].remote_started = true;
-                btif_a2dp_honor_remote_start(btif_av_cb[index].remote_start_alarm, index);
+                btif_a2dp_honor_remote_start(&btif_av_cb[index].remote_start_alarm, index);
               }
             }
           }
