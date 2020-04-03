@@ -92,8 +92,14 @@ bool l2c_link_hci_conn_req(const RawAddress& bd_addr) {
       }
     }
 
-    if (no_links)
-      p_lcb->link_role = L2CAP_DESIRED_LINK_ROLE;
+    if (no_links) {
+      if (BTM_SecIsTwsPlusDev(bd_addr)) {
+        p_lcb->link_role = HCI_ROLE_MASTER;
+        L2CAP_TRACE_WARNING ("l2c_link_hci_conn_req:Tws device:link_role= %d",p_lcb->link_role);
+      } else {
+        p_lcb->link_role = L2CAP_DESIRED_LINK_ROLE;
+      }
+    }
 
     if ((p_lcb->link_role == BTM_ROLE_MASTER)&&(interop_match_addr_or_name(INTEROP_DISABLE_ROLE_SWITCH, &bd_addr))) {
       p_lcb->link_role = BTM_ROLE_SLAVE;
@@ -118,15 +124,18 @@ bool l2c_link_hci_conn_req(const RawAddress& bd_addr) {
       (p_lcb->link_state == LST_CONNECT_HOLDING)) {
     /* Connection collision. Accept the connection anyways. */
 
-    if (!btm_dev_support_switch(bd_addr))
+    if (!btm_dev_support_switch(bd_addr)) {
       p_lcb->link_role = HCI_ROLE_SLAVE;
-    else
+    } else if (BTM_SecIsTwsPlusDev(bd_addr)) {
+      p_lcb->link_role = HCI_ROLE_MASTER;
+    } else {
       p_lcb->link_role = l2cu_get_conn_role(p_lcb);
+    }
 
     if ((p_lcb->link_role == BTM_ROLE_MASTER)&&(interop_match_addr_or_name(INTEROP_DISABLE_ROLE_SWITCH, &bd_addr))) {
       p_lcb->link_role = BTM_ROLE_SLAVE;
-      L2CAP_TRACE_WARNING ("l2c_link_hci_conn_req:set link_role= %d",p_lcb->link_role);
     }
+    L2CAP_TRACE_WARNING ("l2c_link_hci_conn_req:set link_role= %d",p_lcb->link_role);
     btsnd_hcic_accept_conn(bd_addr, p_lcb->link_role);
 
     p_lcb->link_state = LST_CONNECTING;
@@ -738,6 +747,8 @@ void l2c_link_adjust_allocation(void) {
   uint16_t num_hipri_links = 0;
   uint16_t controller_xmit_quota = l2cb.num_lm_acl_bufs;
   uint16_t high_pri_link_quota = L2CAP_HIGH_PRI_MIN_XMIT_QUOTA_A;
+  bool is_share_buffer =
+      (l2cb.num_lm_ble_bufs == L2C_DEF_NUM_BLE_BUF_SHARED) ? true : false;
 
   /* If no links active, reset buffer quotas and controller buffers */
   if (l2cb.num_links_active == 0) {
@@ -748,7 +759,8 @@ void l2c_link_adjust_allocation(void) {
 
   /* First, count the links */
   for (yy = 0, p_lcb = &l2cb.lcb_pool[0]; yy < MAX_L2CAP_LINKS; yy++, p_lcb++) {
-    if (p_lcb->in_use) {
+    if (p_lcb->in_use &&
+        (is_share_buffer || p_lcb->transport != BT_TRANSPORT_LE)) {
       if (p_lcb->acl_priority == L2CAP_PRIORITY_HIGH)
         num_hipri_links++;
       else
@@ -801,7 +813,8 @@ void l2c_link_adjust_allocation(void) {
 
   /* Now, assign the quotas to each link */
   for (yy = 0, p_lcb = &l2cb.lcb_pool[0]; yy < MAX_L2CAP_LINKS; yy++, p_lcb++) {
-    if (p_lcb->in_use) {
+    if (p_lcb->in_use &&
+        (is_share_buffer || p_lcb->transport != BT_TRANSPORT_LE)) {
       if (p_lcb->acl_priority == L2CAP_PRIORITY_HIGH) {
         p_lcb->link_xmit_quota = high_pri_link_quota;
       } else {

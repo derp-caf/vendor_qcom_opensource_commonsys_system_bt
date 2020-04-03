@@ -154,6 +154,7 @@ enum {
   BTA_AV_SET_EARBUD_ROLE_EVT, /* Set TWS earbud role */
   BTA_AV_SET_TWS_DEVICE_EVT, /* Update TWS state */
 #endif
+  BTA_AV_LAST_EVT,
 };
 
 /* MultiBrowse specific connection events */
@@ -177,12 +178,6 @@ enum {
 /* API events passed to both SSMs (by bta_av_api_to_ssm) */
 #define BTA_AV_FIRST_A2S_API_EVT BTA_AV_API_START_EVT
 #define BTA_AV_FIRST_A2S_SSM_EVT BTA_AV_AP_START_EVT
-
-#if (TWS_ENABLED == TRUE)
-#define BTA_AV_LAST_EVT BTA_AV_SET_TWS_DEVICE_EVT
-#else
-#define BTA_AV_LAST_EVT BTA_AV_RC_COLLISSION_DETECTED_EVT
-#endif
 
 /* Info ID from updating aptX Adaptive Encoder mode */
 #define BTA_AV_ENCODER_MODE_CHANGE_ID 5
@@ -483,6 +478,7 @@ typedef struct {
   BT_HDR hdr;
   RawAddress peer_addr;
   uint8_t handle;
+  uint8_t status;
 } tBTA_AV_RC_CONN_CHG;
 
 /* data type for BTA_AV_AVRC_COLL_DETECTED_EVT */
@@ -692,7 +688,7 @@ struct tBTA_AV_SCB {
   bool offload_started;
 //#endif
   bool vendor_start;
-  tBTA_AV_DATA *cache_setconfig;
+  tBTA_AV_CI_SETCONFIG *cache_setconfig;
   int rc_ccb_alloc_handle;
 };
 
@@ -860,7 +856,7 @@ extern uint16_t bta_av_chk_mtu(tBTA_AV_SCB* p_scb, uint16_t mtu);
 extern void bta_av_conn_cback(uint8_t handle, const RawAddress* bd_addr,
                               uint8_t event, tAVDT_CTRL* p_data);
 extern uint8_t bta_av_rc_create(tBTA_AV_CB* p_cb, uint8_t role, uint8_t shdl,
-                                uint8_t lidx);
+                                uint8_t lidx, RawAddress *addr);
 extern void bta_av_stream_chg(tBTA_AV_SCB* p_scb, bool started);
 extern bool bta_av_is_scb_opening(tBTA_AV_SCB* p_scb);
 extern bool bta_av_is_scb_incoming(tBTA_AV_SCB* p_scb);

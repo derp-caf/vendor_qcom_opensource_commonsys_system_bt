@@ -133,6 +133,7 @@ void bta_av_vendor_offload_check_stop_start(tBTA_AV_SCB* p_scb);
 void update_sub_band_info(uint8_t **param, int *param_len, uint8_t id, uint16_t data);
 void update_sub_band_info(uint8_t **param, int *param_len, uint8_t id, uint8_t *data, uint8_t size);
 void enc_mode_change_callback(tBTM_VSC_CMPL *param);
+tBTA_AV_HNDL offload_pending_handle = BTA_AV_HNDL_MSK;
 
 /* state machine states */
 enum {
@@ -1566,9 +1567,9 @@ void bta_av_setconfig_rsp(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
                                                       &av_sink_codec_info, p_scb->peer_addr);
   }
 
-  p_scb->cache_setconfig = (tBTA_AV_DATA *)osi_malloc(sizeof(tBTA_AV_DATA));
-  memset(p_scb->cache_setconfig, 0, sizeof(tBTA_AV_DATA));
-  memcpy(p_scb->cache_setconfig, p_data, sizeof(tBTA_AV_DATA));
+  p_scb->cache_setconfig = (tBTA_AV_CI_SETCONFIG *)osi_malloc(sizeof(tBTA_AV_CI_SETCONFIG));
+  memset(p_scb->cache_setconfig, 0, sizeof(tBTA_AV_CI_SETCONFIG));
+  memcpy(p_scb->cache_setconfig, p_data, sizeof(tBTA_AV_CI_SETCONFIG));
 
   AVDT_ConfigRsp(p_scb->avdt_handle, p_scb->avdt_label,
                  p_data->ci_setconfig.err_code, p_data->ci_setconfig.category);
@@ -1630,11 +1631,12 @@ void bta_av_setconfig_rsp(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
             bta_av_next_getcap(p_scb, p_data);
         }
     } else {
-        if (local_sep == AVDT_TSEP_SRC)
+        if (local_sep == AVDT_TSEP_SRC) {
           if (p_scb->uuid_int == 0) p_scb->uuid_int = UUID_SERVCLASS_AUDIO_SOURCE/*p_scb->open_api.uuid*/;
             /* we do not know the peer device and it is using non-SBC codec
              * we need to know all the SEPs on SNK */
           bta_av_discover_req(p_scb, NULL);
+        }
     }
   }
 }
@@ -1796,6 +1798,13 @@ void bta_av_str_opened(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
     tBTA_AV bta_av_data;
     bta_av_data.open = open;
     (*bta_av_cb.p_cback)(BTA_AV_OPEN_EVT, &bta_av_data);
+
+    APPL_TRACE_DEBUG("%s: Free Audio list from previous stream", __func__);
+    while (!list_is_empty(p_scb->a2dp_list)) {
+      BT_HDR* p_buf = (BT_HDR*)list_front(p_scb->a2dp_list);
+      list_remove(p_scb->a2dp_list, p_buf);
+      osi_free(p_buf);
+    }
 #if (TWS_ENABLED == TRUE)
     APPL_TRACE_DEBUG("%s:audio count  = %d ",__func__, bta_av_cb.audio_open_cnt);
     if (p_scb->tws_device) {
@@ -1838,6 +1847,13 @@ void bta_av_str_opened(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
       (!strcmp(value, "true"))) {
     APPL_TRACE_ERROR("%s: Calling AVDT_AbortReq", __func__);
     AVDT_AbortReq(p_scb->avdt_handle);
+  }
+
+  //To pass SNK AVDTP PTS, AVDTP/SNK/INT/SIG/SMG/BV-19-C
+  if ((osi_property_get("bluetooth.pts.force_a2dp_start", value, "false")) &&
+      (!strcmp(value, "true"))) {
+    APPL_TRACE_ERROR("%s: Calling AVDT_StartReq", __func__);
+    AVDT_StartReq(&p_scb->avdt_handle, 1);
   }
 }
 
@@ -2083,7 +2099,7 @@ void bta_av_disc_res_as_acp(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
   if (p_scb->num_seps > 0) {
     if (p_scb->cache_setconfig) {
       APPL_TRACE_DEBUG("%s: Got discover_res as ok from remote.", __func__);
-      memset(p_scb->cache_setconfig, 0, sizeof(tBTA_AV_DATA));
+      memset(p_scb->cache_setconfig, 0, sizeof(tBTA_AV_CI_SETCONFIG));
       osi_free(p_scb->cache_setconfig);
       p_scb->cache_setconfig = NULL;
     }
@@ -3328,9 +3344,11 @@ void bta_av_suspend_cfm(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
   }
 
   suspend_rsp.status = BTA_AV_SUCCESS;
-  if (err_code && (err_code != AVDT_ERR_BAD_STATE)) {
-    /* Disable suspend feature only with explicit rejection(not with timeout & connect error) */
-    if ((err_code != AVDT_ERR_TIMEOUT) && (err_code != AVDT_ERR_CONNECT)) {
+  if (err_code) {
+    /* Disable suspend feature only with explicit rejection
+     * (not with timeout, badstate & connect error) */
+    if ((err_code != AVDT_ERR_TIMEOUT) && (err_code != AVDT_ERR_CONNECT) &&
+        (err_code != AVDT_ERR_BAD_STATE)) {
       p_scb->suspend_sup = false;
     }
     suspend_rsp.status = BTA_AV_FAIL;
@@ -3628,6 +3646,11 @@ void bta_av_rcfg_cfm(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
     if ((err_code != AVDT_ERR_TIMEOUT) || disable_avdtp_reconfigure) {
       p_scb->recfg_sup = false;
     }
+
+    if (p_scb->started) {
+      APPL_TRACE_WARNING("%s: set p_scb->started to false", __func__);
+      p_scb->started = false;
+    }
     /* started flag is false when reconfigure command is sent */
     /* drop the buffers queued in L2CAP */
     L2CA_FlushChannel(p_scb->l2c_cid, L2CAP_FLUSH_CHANS_ALL);
@@ -3672,6 +3695,13 @@ void bta_av_rcfg_open(tBTA_AV_SCB* p_scb, UNUSED_ATTR tBTA_AV_DATA* p_data) {
     /* we may choose to use a different SEP at reconfig.
      * adjust the sep_idx now */
     bta_av_adjust_seps_idx(p_scb, bta_av_get_scb_handle(p_scb, AVDT_TSEP_SRC));
+
+    APPL_TRACE_DEBUG("%s: Free Audio list from previous stream", __func__);
+    while (!list_is_empty(p_scb->a2dp_list)) {
+      BT_HDR* p_buf = (BT_HDR*)list_front(p_scb->a2dp_list);
+      list_remove(p_scb->a2dp_list, p_buf);
+      osi_free(p_buf);
+    }
 
     /* open the stream with the new config */
     p_scb->sep_info_idx = p_scb->rcfg_idx;
@@ -4001,7 +4031,20 @@ void offload_vendor_callback(tBTM_VSC_CMPL *param)
           break;
       case VS_QHCI_A2DP_OFFLOAD_START:
           APPL_TRACE_DEBUG("%s: single VSC success: %d",__func__, param->p_param_buf[1]);
-          (*bta_av_cb.p_cback)(BTA_AV_OFFLOAD_START_RSP_EVT, (tBTA_AV*)&status);
+          tBTA_AV bta_av_data;
+          tBTA_AV_OFFLOAD_RSP offload_rsp;
+          if (offload_pending_handle != BTA_AV_HNDL_MSK) {
+            offload_rsp.hndl = offload_pending_handle;
+            offload_pending_handle = BTA_AV_HNDL_MSK;
+            APPL_TRACE_DEBUG("%s:resetting offload_pending_handle",__func__);
+          } else {
+            offload_rsp.hndl = offload_start.p_scb->hndl;
+          }
+          offload_rsp.status = status;
+          //bta_av_data.start.hndl = offload_start.p_scb->hndl;
+          bta_av_data.offload_rsp = offload_rsp;
+          offload_start.p_scb->vendor_start = true;
+          (*bta_av_cb.p_cback)(BTA_AV_OFFLOAD_START_RSP_EVT, &bta_av_data);
           break;
       default:
       break;
@@ -4015,8 +4058,24 @@ void offload_vendor_callback(tBTM_VSC_CMPL *param)
     last_sent_vsc_cmd = 0;
   } else {
     APPL_TRACE_DEBUG("Offload failed for subopcode= %d",param->p_param_buf[1]);
-    if (param->opcode != VS_QHCI_STOP_A2DP_MEDIA)
-      (*bta_av_cb.p_cback)(BTA_AV_OFFLOAD_START_RSP_EVT, (tBTA_AV*)&status);
+    if (param->opcode != VS_QHCI_STOP_A2DP_MEDIA) {
+      if (!btif_a2dp_src_vsc.multi_vsc_support) {
+        tBTA_AV bta_av_data;
+        tBTA_AV_OFFLOAD_RSP offload_rsp;
+        if (offload_pending_handle != BTA_AV_HNDL_MSK) {
+          offload_rsp.hndl = offload_pending_handle;
+          offload_pending_handle = BTA_AV_HNDL_MSK;
+          APPL_TRACE_DEBUG("%s:resetting offload_pending_handle",__func__);
+        } else {
+          offload_rsp.hndl = offload_start.p_scb->hndl;
+        }
+        offload_rsp.status = status;
+        bta_av_data.offload_rsp = offload_rsp;
+        (*bta_av_cb.p_cback)(BTA_AV_OFFLOAD_START_RSP_EVT, &bta_av_data);
+      } else {
+        (*bta_av_cb.p_cback)(BTA_AV_OFFLOAD_START_RSP_EVT, (tBTA_AV*)&status);
+      }
+    }
   }
 }
 
@@ -4216,9 +4275,10 @@ void bta_av_vendor_offload_stop(tBTA_AV_SCB* p_scb)
 {
   uint8_t param[2];
   unsigned char status = 0;
-  APPL_TRACE_DEBUG("%s: handle: 0x%x, peer_add: %s, vendor_start: %d",
-            __func__, p_scb->hndl, p_scb->peer_addr.ToString().c_str(), p_scb->vendor_start);
-
+  if (p_scb != NULL) {
+    APPL_TRACE_DEBUG("%s: handle: 0x%x, peer_add: %s, vendor_start: %d",
+              __func__, p_scb->hndl, p_scb->peer_addr.ToString().c_str(), p_scb->vendor_start);
+  }
   if (p_scb == NULL) {
     APPL_TRACE_DEBUG("stop called from upper layer");
   }else if (p_scb->tws_device) {
@@ -4481,7 +4541,7 @@ void bta_av_offload_req(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
                                          tws_pair_addr) == true) {
               APPL_TRACE_DEBUG("%s:TWS pair found",__func__);
               if (tws_pair_addr == p_scb->peer_addr &&
-                !p_scbi->offload_supported && p_scbi->eb_state == TWSP_EB_STATE_IN_EAR) {
+                !p_scbi->offload_supported) {
                 APPL_TRACE_DEBUG("%s:VSC is not exchanged for second earbud",__func__);
                 offload_start.stream_start = false;
               }
@@ -4510,8 +4570,11 @@ void bta_av_offload_req(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
         }
       }
     }
-    else
+    else {
       p_scb->offload_started = false;
+      offload_pending_handle = p_scb->hndl;
+      APPL_TRACE_DEBUG("%s:setting offload_pending_handle = %d", __func__,offload_pending_handle);
+    }
     offload_start.ttp = 150;
     memset(offload_start.codec_info, 0 , AVDT_CODEC_SIZE);
     memcpy(offload_start.codec_info, p_scb->cfg.codec_info,
@@ -4636,8 +4699,8 @@ void bta_av_disc_fail_as_acp(tBTA_AV_SCB* p_scb, tBTA_AV_DATA* p_data) {
   if (p_scb->cache_setconfig) {
     APPL_TRACE_DEBUG("%s: Need to reuse the cached set_config, to do get_caps"
                       " for the same SEP", __func__);
-    memcpy(p_data, p_scb->cache_setconfig, sizeof(tBTA_AV_DATA));
-    memset(p_scb->cache_setconfig, 0, sizeof(tBTA_AV_DATA));
+    memcpy(p_data, p_scb->cache_setconfig, sizeof(tBTA_AV_CI_SETCONFIG));
+    memset(p_scb->cache_setconfig, 0, sizeof(tBTA_AV_CI_SETCONFIG));
     osi_free(p_scb->cache_setconfig);
     p_scb->cache_setconfig = NULL;
   }

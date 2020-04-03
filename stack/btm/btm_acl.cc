@@ -295,6 +295,11 @@ void btm_acl_created(const RawAddress& bda, DEV_CLASS dc, BD_NAME bdn,
             interop_match_addr_or_name(INTEROP_ENABLE_PL10_ADAPTIVE_CONTROL, &bda)) {
           btm_enable_link_PL10_adaptive_ctrl(hci_handle, true);
         }
+
+        if (soc_type == BT_SOC_TYPE_HASTINGS && is_soc_lpa_enh_pwr_enabled() &&
+            interop_match_addr_or_name(INTEROP_DISABLE_LPA_ENHANCED_POWER_CONTROL, &bda)) {
+            btm_enable_link_lpa_enh_pwr_ctrl(hci_handle, false);
+        }
       }
       p_dev_rec = btm_find_dev_by_handle(hci_handle);
 
@@ -959,6 +964,12 @@ void btm_use_preferred_conn_params(const RawAddress& bda) {
   tL2C_LCB* p_lcb = l2cu_find_lcb_by_bd_addr(bda, BT_TRANSPORT_LE);
   tBTM_SEC_DEV_REC* p_dev_rec = btm_find_or_alloc_dev(bda);
 
+  if (p_lcb == NULL || p_dev_rec == NULL) {
+    BTM_TRACE_ERROR("%s: p_lcb or p_dev_rec not found for remote device: %s", __func__,
+                        bda.ToString().c_str());
+    return;
+  }
+
   /* If there are any preferred connection parameters, set them now */
   if ((p_dev_rec->conn_params.min_conn_int >= BTM_BLE_CONN_INT_MIN) &&
       (p_dev_rec->conn_params.min_conn_int <= BTM_BLE_CONN_INT_MAX) &&
@@ -1236,13 +1247,21 @@ void btm_read_remote_features_complete(uint8_t* p) {
  * Returns          void
  *
  ******************************************************************************/
-void btm_read_remote_ext_features_complete(uint8_t* p) {
+void btm_read_remote_ext_features_complete(uint8_t* p, uint8_t evt_len) {
   tACL_CONN* p_acl_cb;
   uint8_t page_num, max_page;
   uint16_t handle;
   uint8_t acl_idx;
 
   BTM_TRACE_DEBUG("btm_read_remote_ext_features_complete");
+
+  if (evt_len < HCI_EXT_FEATURES_SUCCESS_EVT_LEN) {
+    android_errorWriteLog(0x534e4554, "141552859");
+    BTM_TRACE_ERROR(
+        "btm_read_remote_ext_features_complete evt length too short. length=%d",
+        evt_len);
+    return;
+  }
 
   ++p;
   STREAM_TO_UINT16(handle, p);
@@ -1261,6 +1280,19 @@ void btm_read_remote_ext_features_complete(uint8_t* p) {
     BTM_TRACE_ERROR("btm_read_remote_ext_features_complete page=%d unknown",
                     max_page);
     return;
+  }
+
+  if (page_num > HCI_EXT_FEATURES_PAGE_MAX) {
+    android_errorWriteLog(0x534e4554, "141552859");
+    BTM_TRACE_ERROR("btm_read_remote_ext_features_complete num_page=%d invalid",
+                    page_num);
+    return;
+  }
+
+  if (page_num > max_page) {
+    BTM_TRACE_WARNING(
+        "btm_read_remote_ext_features_complete num_page=%d, max_page=%d "
+        "invalid", page_num, max_page);
   }
 
   p_acl_cb = &btm_cb.acl_db[acl_idx];
@@ -1681,7 +1713,9 @@ void btm_acl_role_changed(uint8_t hci_status, const RawAddress* bd_addr,
   tBTM_ROLE_SWITCH_CMPL* p_data = &btm_cb.devcb.switch_role_ref_data;
   tBTM_SEC_DEV_REC* p_dev_rec;
 
-  BTM_TRACE_WARNING ("btm_acl_role_changed: New role: %d", new_role);
+  BTM_TRACE_WARNING("%s: peer %s hci_status:0x%x new_role:%d", __func__,
+                    (p_bda != nullptr) ?
+                      p_bda->ToString().c_str() : "nullptr", hci_status, new_role);
   /* Ignore any stray events */
   if (p == NULL) {
     /* it could be a failure */
@@ -1689,9 +1723,6 @@ void btm_acl_role_changed(uint8_t hci_status, const RawAddress* bd_addr,
       btm_acl_report_role_change(hci_status, bd_addr);
     return;
   }
-
-  BTM_TRACE_WARNING ("btm_acl_role_changed: BDA: %02x-%02x-%02x-%02x-%02x-%02x",
-        p_bda[0], p_bda[1], p_bda[2], p_bda[3], p_bda[4], p_bda[5]);
 
   p_data->hci_status = hci_status;
 
